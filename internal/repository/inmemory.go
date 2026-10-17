@@ -11,13 +11,15 @@ import (
 )
 
 type InMemoryLoan struct {
-	mu    sync.RWMutex
-	loans map[domain.LoanID]domain.Loan
+	mu          sync.RWMutex
+	loans       map[domain.LoanID]domain.Loan
+	idempotency map[string]domain.LoanID
 }
 
 func NewInMemoryLoan() *InMemoryLoan {
 	return &InMemoryLoan{
-		loans: make(map[domain.LoanID]domain.Loan),
+		loans:       make(map[domain.LoanID]domain.Loan),
+		idempotency: make(map[string]domain.LoanID),
 	}
 }
 
@@ -26,6 +28,12 @@ func (r *InMemoryLoan) Save(ctx context.Context, l domain.Loan) error {
 	defer r.mu.Unlock()
 	if l.ID == uuid.Nil {
 		l.ID = uuid.New()
+	}
+	if l.IdempotencyKey != "" {
+		if existing, ok := r.idempotency[l.IdempotencyKey]; ok {
+			return fmt.Errorf("idempotency key already used: %s", existing)
+		}
+		r.idempotency[l.IdempotencyKey] = l.ID
 	}
 	r.loans[l.ID] = l
 	return nil

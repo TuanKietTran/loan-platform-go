@@ -28,9 +28,10 @@ func (h *Handlers) Routes() chi.Router {
 }
 
 type createReq struct {
-	Principal    decimal.Decimal `json:"principal"`
-	InterestRate decimal.Decimal `json:"interest_rate"`
-	TermMonths   int             `json:"term_months"`
+	Principal      decimal.Decimal `json:"principal"`
+	InterestRate   decimal.Decimal `json:"interest_rate"`
+	TermMonths     int             `json:"term_months"`
+	IdempotencyKey string          `json:"idempotency_key"`
 }
 
 func (h *Handlers) createLoan(w http.ResponseWriter, r *http.Request) {
@@ -40,9 +41,10 @@ func (h *Handlers) createLoan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := h.create.Handle(r.Context(), command.CreateLoanCommand{
-		Principal:    req.Principal,
-		InterestRate: req.InterestRate,
-		TermMonths:   req.TermMonths,
+		Principal:      req.Principal,
+		InterestRate:   req.InterestRate,
+		TermMonths:     req.TermMonths,
+		IdempotencyKey: req.IdempotencyKey,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

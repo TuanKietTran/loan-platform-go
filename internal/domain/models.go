@@ -10,17 +10,18 @@ type LoanID = uuid.UUID
 type LoanStatus string
 
 const (
-	StatusPending  LoanStatus = "PENDING"
-	StatusActive   LoanStatus = "ACTIVE"
-	StatusPaidOff  LoanStatus = "PAID_OFF"
+	StatusPending LoanStatus = "PENDING"
+	StatusActive  LoanStatus = "ACTIVE"
+	StatusPaidOff LoanStatus = "PAID_OFF"
 )
 
 type Loan struct {
-	ID                  LoanID
-	Principal           decimal.Decimal
-	InterestRate        decimal.Decimal
-	TermMonths          int
-	Status              LoanStatus
+	ID                   LoanID
+	Principal            decimal.Decimal
+	InterestRate         decimal.Decimal
+	TermMonths           int
+	Status               LoanStatus
 	OutstandingPrincipal decimal.Decimal
-	AccruedInterest     decimal.Decimal
+	AccruedInterest      decimal.Decimal
+	IdempotencyKey       string
 }

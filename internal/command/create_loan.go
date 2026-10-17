@@ -10,9 +10,10 @@ import (
 )
 
 type CreateLoanCommand struct {
-	Principal    decimal.Decimal
-	InterestRate decimal.Decimal
-	TermMonths   int
+	Principal      decimal.Decimal
+	InterestRate   decimal.Decimal
+	TermMonths     int
+	IdempotencyKey string
 }
 
 type CreateLoanHandler struct {
@@ -32,6 +33,7 @@ func (h *CreateLoanHandler) Handle(ctx context.Context, cmd CreateLoanCommand) (
 		Status:               domain.StatusPending,
 		OutstandingPrincipal: cmd.Principal,
 		AccruedInterest:      decimal.Zero,
+		IdempotencyKey:       cmd.IdempotencyKey,
 	}
 	if err := h.repo.Save(ctx, loan); err != nil {
 		return uuid.Nil, err

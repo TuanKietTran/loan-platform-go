@@ -16,6 +16,7 @@ Go 1.22, Chi, `shopspring/decimal`, Google UUID. In-memory only.
 | Date | Change | Evidence |
 | --- | --- | --- |
 | 2026-10-17 | Baseline spec recorded from the shipped service | `13bf845`. No handler tests and no Postgres repository yet. |
+| 2026-10-17 | 1000 requests in one minute, retry, playback, coverage | `internal/playback`. 1000 keyed loans plus one 503 retry each finished in 80ms. Replay returned the original ids. A missing key still creates another loan. Statement coverage 61.6%. |
 
 ## Out of scope until implemented
 
