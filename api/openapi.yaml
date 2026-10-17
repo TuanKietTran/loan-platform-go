@@ -10,11 +10,7 @@ paths:
     post:
       operationId: createLoan
       summary: Create a pending loan (implemented)
-      parameters:
-        - in: header
-          name: Idempotency-Key
-          required: false
-          schema: { type: string }
+      description: Idempotency-Key header is not consumed in the current implementation; do not rely on header-based replay until a later published contract.
       requestBody:
         required: true
         content:
