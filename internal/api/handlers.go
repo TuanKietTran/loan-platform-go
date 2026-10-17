@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/example/loan-platform/internal/command"
-	"github.com/example/loan-platform/internal/query"
+	"github.com/TuanKietTran/loan-platform-go/internal/command"
+	"github.com/TuanKietTran/loan-platform-go/internal/query"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"

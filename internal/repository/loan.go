@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/example/loan-platform/internal/domain"
+	"github.com/TuanKietTran/loan-platform-go/internal/domain"
 )
 
 type LoanRepository interface {

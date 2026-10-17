@@ -1,4 +1,4 @@
-module github.com/example/loan-platform
+module github.com/TuanKietTran/loan-platform-go
 
 go 1.22
 

@@ -3,8 +3,8 @@ package query
 import (
 	"context"
 
-	"github.com/example/loan-platform/internal/domain"
-	"github.com/example/loan-platform/internal/repository"
+	"github.com/TuanKietTran/loan-platform-go/internal/domain"
+	"github.com/TuanKietTran/loan-platform-go/internal/repository"
 	"github.com/shopspring/decimal"
 )
 

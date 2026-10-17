@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/example/loan-platform/internal/domain"
+	"github.com/TuanKietTran/loan-platform-go/internal/domain"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )

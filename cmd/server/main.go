@@ -4,10 +4,10 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/example/loan-platform/internal/api"
-	"github.com/example/loan-platform/internal/command"
-	"github.com/example/loan-platform/internal/query"
-	"github.com/example/loan-platform/internal/repository"
+	"github.com/TuanKietTran/loan-platform-go/internal/api"
+	"github.com/TuanKietTran/loan-platform-go/internal/command"
+	"github.com/TuanKietTran/loan-platform-go/internal/query"
+	"github.com/TuanKietTran/loan-platform-go/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
