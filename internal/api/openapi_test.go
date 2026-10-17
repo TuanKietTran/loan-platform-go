@@ -23,7 +23,7 @@ func TestOpenAPIImplementedRoutesAndStatuses(t *testing.T) {
 		t.Fatalf("parse OpenAPI: %v", err)
 	}
 	want := map[string]map[string][]string{
-		"/v1/loans":             {"post": {"200", "400"}},
+		"/v1/loans":             {"post": {"200", "400", "409"}},
 		"/v1/loans/{id}/payoff": {"get": {"200", "400", "404"}},
 	}
 	if len(doc.Paths) != len(want) {

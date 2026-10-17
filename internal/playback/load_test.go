@@ -84,7 +84,7 @@ func TestThousandPerMinuteAndPlayback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, o := range second {
-		if o.Attempts != 1 || !IsIdempotentReplay(o.Status, o.Body) || !search(string(o.Body), ids[i]) {
+		if o.Attempts != 1 || o.Status != http.StatusOK || !search(string(o.Body), ids[i]) {
 			t.Fatalf("playback %d status %d body %s", i, o.Status, o.Body)
 		}
 	}
@@ -99,7 +99,7 @@ func TestThousandPerMinuteAndPlayback(t *testing.T) {
 	}
 }
 
-func TestLoanWithoutKeyCreatesAnother(t *testing.T) {
+func TestLoanWithoutKeyIsRejected(t *testing.T) {
 	repo := repository.NewInMemoryLoan()
 	h := api.NewHandlers(command.NewCreateLoanHandler(repo), query.NewGetPayoffHandler(repo))
 	router := chi.NewRouter()
@@ -107,22 +107,11 @@ func TestLoanWithoutKeyCreatesAnother(t *testing.T) {
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	call := Call{Method: http.MethodPost, Path: "/v1/loans", Body: []byte(`{"principal":"5","interest_rate":"0.1","term_months":6}`)}
-	var ids []string
 	for n := 0; n < 2; n++ {
 		out, err := Play(context.Background(), srv.Client(), srv.URL, []Call{call}, DefaultPolicy())
-		if err != nil || out[0].Status != http.StatusOK {
+		if err != nil || out[0].Status != http.StatusBadRequest || !search(string(out[0].Body), "idempotency key required") {
 			t.Fatalf("post %d %+v %v", n, out, err)
 		}
-		var created struct {
-			LoanID string `json:"loan_id"`
-		}
-		if err := json.Unmarshal(out[0].Body, &created); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, created.LoanID)
-	}
-	if ids[0] == "" || ids[0] == ids[1] {
-		t.Fatalf("ids %v", ids)
 	}
 }
 

@@ -11,15 +11,17 @@ import (
 )
 
 type InMemoryLoan struct {
-	mu          sync.RWMutex
-	loans       map[domain.LoanID]domain.Loan
-	idempotency map[string]domain.LoanID
+	mu           sync.RWMutex
+	loans        map[domain.LoanID]domain.Loan
+	idempotency  map[string]domain.LoanID
+	fingerprints map[string]string
 }
 
 func NewInMemoryLoan() *InMemoryLoan {
 	return &InMemoryLoan{
-		loans:       make(map[domain.LoanID]domain.Loan),
-		idempotency: make(map[string]domain.LoanID),
+		loans:        make(map[domain.LoanID]domain.Loan),
+		idempotency:  make(map[string]domain.LoanID),
+		fingerprints: make(map[string]string),
 	}
 }
 
@@ -31,12 +33,27 @@ func (r *InMemoryLoan) Save(ctx context.Context, l domain.Loan) error {
 	}
 	if l.IdempotencyKey != "" {
 		if existing, ok := r.idempotency[l.IdempotencyKey]; ok {
-			return fmt.Errorf("idempotency key already used: %s", existing)
+			old := r.loans[existing]
+			if old.Principal.Equal(l.Principal) && old.InterestRate.Equal(l.InterestRate) && old.TermMonths == l.TermMonths {
+				return nil
+			}
+			return fmt.Errorf("idempotency key payload conflict: %s", existing)
 		}
 		r.idempotency[l.IdempotencyKey] = l.ID
 	}
 	r.loans[l.ID] = l
 	return nil
+}
+
+func (r *InMemoryLoan) GetByKey(key string) (*domain.Loan, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.idempotency[key]
+	if !ok {
+		return nil, false
+	}
+	l := r.loans[id]
+	return &l, true
 }
 
 func (r *InMemoryLoan) GetByID(ctx context.Context, id domain.LoanID) (*domain.Loan, error) {

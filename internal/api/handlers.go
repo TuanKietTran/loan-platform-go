@@ -40,14 +40,30 @@ func (h *Handlers) createLoan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	key := req.IdempotencyKey
+	if header := r.Header.Get("Idempotency-Key"); header != "" {
+		if key != "" && key != header {
+			http.Error(w, "idempotency key disagreement", http.StatusBadRequest)
+			return
+		}
+		key = header
+	}
+	if key == "" {
+		http.Error(w, "idempotency key required", http.StatusBadRequest)
+		return
+	}
 	id, err := h.create.Handle(r.Context(), command.CreateLoanCommand{
 		Principal:      req.Principal,
 		InterestRate:   req.InterestRate,
 		TermMonths:     req.TermMonths,
-		IdempotencyKey: req.IdempotencyKey,
+		IdempotencyKey: key,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := http.StatusBadRequest
+		if err.Error() == "idempotency payload conflict" {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

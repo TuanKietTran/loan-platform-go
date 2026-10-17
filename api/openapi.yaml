@@ -10,14 +10,14 @@ paths:
     post:
       operationId: createLoan
       summary: Create a pending loan (implemented)
-      description: Idempotency-Key header is not consumed in the current implementation; do not rely on header-based replay until a later published contract.
+      description: Idempotency-Key is accepted as an alternative to body idempotency_key; if both are supplied they must match.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [principal, interest_rate, term_months]
+              required: [principal, interest_rate, term_months, idempotency_key]
               properties:
                 principal: { type: string, example: "10000.00" }
                 interest_rate: { type: string, example: "0.08" }
@@ -29,7 +29,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LoanCreated' }
-        '400': { description: Invalid JSON or command rejected; legacy idempotency duplicate also returns 400 with original identity }
+        '400': { description: Invalid JSON, missing key, or key/header disagreement }
+        '409': { description: Idempotency key reused with a different payload }
   /v1/loans/{id}/payoff:
     get:
       operationId: getPayoff
