@@ -1,2 +1,18 @@
-# loan-platform-go
-Loan origination &amp; servicing platform in Go with CQRS
+# Loan Platform (CQRS)
+
+Loan origination and servicing with CQRS.
+
+## Commands
+- CreateLoan
+- RecordRepayment
+- AccrueInterest
+
+## Queries
+- GetLoan
+- GetPayoffQuote
+- GetSchedule
+
+## Run
+```bash
+go run ./cmd/server
+```
