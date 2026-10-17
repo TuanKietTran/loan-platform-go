@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 
+	"github.com/example/loan-platform/internal/api"
 	"github.com/example/loan-platform/internal/command"
 	"github.com/example/loan-platform/internal/domain"
 	"github.com/example/loan-platform/internal/query"
-	"github.com/example/loan-platform/internal/repository"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 )
 
 type memRepo struct {
@@ -36,21 +38,13 @@ func main() {
 	repo := &memRepo{}
 	createH := command.NewCreateLoanHandler(repo)
 	payoffH := query.NewGetPayoffHandler(repo)
+	handlers := api.NewHandlers(createH, payoffH)
 
-	id, err := createH.Handle(context.Background(), command.CreateLoanCommand{
-		Principal:    decimal.NewFromInt(10000),
-		InterestRate: decimal.NewFromFloat(0.08),
-		TermMonths:   36,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Created loan:", id)
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Mount("/v1", handlers.Routes())
 
-	quote, err := payoffH.Handle(context.Background(), query.GetPayoffQuery{LoanID: id})
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Payoff: principal=%s interest=%s total=%s\n",
-		quote.Principal, quote.AccruedInterest, quote.Total)
+	log.Println("Loan API listening on :8084")
+	log.Fatal(http.ListenAndServe(":8084", r))
 }
