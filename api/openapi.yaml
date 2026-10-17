@@ -1,0 +1,76 @@
+openapi: 3.0.3
+info:
+  title: Loan Platform API
+  version: 0.1.0
+  description: Implemented endpoints are limited to create and payoff. Future routes are documented under plannedRoutes and are not callable yet.
+servers:
+  - url: http://localhost:8104
+paths:
+  /v1/loans:
+    post:
+      operationId: createLoan
+      summary: Create a pending loan (implemented)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [principal, interest_rate, term_months]
+              properties:
+                principal: { type: string, example: "10000.00" }
+                interest_rate: { type: string, example: "0.08" }
+                term_months: { type: integer, minimum: 1 }
+                idempotency_key: { type: string }
+      responses:
+        '200':
+          description: Created or replayed loan identity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanCreated' }
+        '400': { description: Invalid JSON or command rejected; legacy idempotency duplicate also returns 400 with original identity }
+  /v1/loans/{id}/payoff:
+    get:
+      operationId: getPayoff
+      summary: Quote outstanding principal plus accrued interest (implemented)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Payoff quote
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayoffQuote' }
+        '400': { description: Invalid loan UUID }
+        '404': { description: Loan not found }
+components:
+  schemas:
+    LoanCreated:
+      type: object
+      required: [loan_id]
+      properties:
+        loan_id: { type: string, format: uuid }
+    PayoffQuote:
+      type: object
+      properties:
+        loan_id: { type: string, format: uuid }
+        amount: { type: string }
+        currency: { type: string, description: Not present in current implementation }
+plannedRoutes:
+  description: Planned only; excluded from executable paths until implementation and tested publication.
+  routes:
+    - POST /v1/applications
+    - GET /v1/loans/{id}
+    - GET /v1/loans/{id}/schedule
+    - POST /v1/loans/{id}/disbursement
+    - POST /v1/loans/{id}/repayments
+    - POST /v1/loans/{id}/accrual
+    - POST /v1/loans/{id}/prepayment
