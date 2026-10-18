@@ -11,23 +11,29 @@ import (
 )
 
 type InMemoryLoan struct {
-	mu           sync.RWMutex
-	loans        map[domain.LoanID]domain.Loan
-	idempotency  map[string]domain.LoanID
-	fingerprints map[string]string
+	mu          sync.RWMutex
+	loans       map[domain.LoanID]domain.Loan
+	idempotency map[string]domain.LoanID
 }
 
 func NewInMemoryLoan() *InMemoryLoan {
 	return &InMemoryLoan{
-		loans:        make(map[domain.LoanID]domain.Loan),
-		idempotency:  make(map[string]domain.LoanID),
-		fingerprints: make(map[string]string),
+		loans:       make(map[domain.LoanID]domain.Loan),
+		idempotency: make(map[string]domain.LoanID),
 	}
 }
 
 func (r *InMemoryLoan) Save(ctx context.Context, l domain.Loan) error {
+	_, err := r.CreateOrReplay(ctx, l)
+	return err
+}
+
+func (r *InMemoryLoan) CreateOrReplay(ctx context.Context, l domain.Loan) (domain.LoanID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return uuid.Nil, err
+	}
 	if l.ID == uuid.Nil {
 		l.ID = uuid.New()
 	}
@@ -35,14 +41,19 @@ func (r *InMemoryLoan) Save(ctx context.Context, l domain.Loan) error {
 		if existing, ok := r.idempotency[l.IdempotencyKey]; ok {
 			old := r.loans[existing]
 			if old.Principal.Equal(l.Principal) && old.InterestRate.Equal(l.InterestRate) && old.TermMonths == l.TermMonths {
-				return nil
+				return existing, nil
 			}
-			return fmt.Errorf("idempotency key payload conflict: %s", existing)
+			return uuid.Nil, ErrConflict
 		}
+	}
+	if _, exists := r.loans[l.ID]; exists {
+		return uuid.Nil, ErrConflict
+	}
+	if l.IdempotencyKey != "" {
 		r.idempotency[l.IdempotencyKey] = l.ID
 	}
 	r.loans[l.ID] = l
-	return nil
+	return l.ID, nil
 }
 
 func (r *InMemoryLoan) GetByKey(key string) (*domain.Loan, bool) {
@@ -59,6 +70,9 @@ func (r *InMemoryLoan) GetByKey(key string) (*domain.Loan, bool) {
 func (r *InMemoryLoan) GetByID(ctx context.Context, id domain.LoanID) (*domain.Loan, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	l, ok := r.loans[id]
 	if !ok {
 		return nil, fmt.Errorf("loan not found")
@@ -69,6 +83,12 @@ func (r *InMemoryLoan) GetByID(ctx context.Context, id domain.LoanID) (*domain.L
 func (r *InMemoryLoan) AccrueInterest(ctx context.Context, id domain.LoanID, days int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if days < 0 {
+		return fmt.Errorf("negative accrual days")
+	}
 	l, ok := r.loans[id]
 	if !ok {
 		return fmt.Errorf("loan not found")

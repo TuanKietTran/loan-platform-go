@@ -1,7 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"os"
+
+	"github.com/TuanKietTran/loan-platform-go/internal/query"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -11,6 +14,11 @@ type contract struct {
 	Paths map[string]map[string]struct {
 		Responses map[string]yaml.Node `yaml:"responses"`
 	} `yaml:"paths"`
+	Components struct {
+		Schemas map[string]struct {
+			Properties map[string]yaml.Node `yaml:"properties"`
+		} `yaml:"schemas"`
+	} `yaml:"components"`
 }
 
 func TestOpenAPIImplementedRoutesAndStatuses(t *testing.T) {
@@ -21,6 +29,23 @@ func TestOpenAPIImplementedRoutesAndStatuses(t *testing.T) {
 	var doc contract
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		t.Fatalf("parse OpenAPI: %v", err)
+	}
+	raw, err := json.Marshal(query.PayoffQuote{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	properties := doc.Components.Schemas["PayoffQuote"].Properties
+	if len(properties) != len(fields) {
+		t.Fatal("payoff schema differs from serialized response")
+	}
+	for name := range fields {
+		if _, ok := properties[name]; !ok {
+			t.Errorf("payoff schema missing %s", name)
+		}
 	}
 	want := map[string]map[string][]string{
 		"/v1/loans":             {"post": {"200", "400", "409"}},

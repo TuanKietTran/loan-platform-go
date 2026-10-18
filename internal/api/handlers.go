@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/TuanKietTran/loan-platform-go/internal/command"
 	"github.com/TuanKietTran/loan-platform-go/internal/query"
+	"github.com/TuanKietTran/loan-platform-go/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -60,7 +62,7 @@ func (h *Handlers) createLoan(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status := http.StatusBadRequest
-		if err.Error() == "idempotency payload conflict" {
+		if errors.Is(err, repository.ErrConflict) {
 			status = http.StatusConflict
 		}
 		http.Error(w, err.Error(), status)

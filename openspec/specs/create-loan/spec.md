@@ -1,46 +1,36 @@
 # Create loan
 
 ## Purpose
-
-Store a pending loan whose outstanding principal starts equal to the principal and whose accrued interest starts at zero.
+Store a validated keyed pending loan, returning its canonical persisted ID even across concurrent handlers. These legacy endpoints do not perform application underwriting or downstream disbursement.
 
 ## Requirements
 
 ### Requirement: Originate a pending loan
-The system SHALL store the posted principal, interest rate, and term, and return a loan id.
+The system SHALL store positive principal, nonnegative interest rate and term 1..600, returning a canonical persisted loan ID. A new loan SHALL be PENDING, with outstanding principal equal to principal and zero accrued interest.
 
 #### Scenario: Create
-- **WHEN** a client posts `principal` 1000, `interest_rate` 0.12, and `term_months` 12
-- **THEN** the response is HTTP 200 and contains `loan_id`
-- **AND** the loan status is `PENDING`
-- **AND** outstanding principal is 1000
-- **AND** accrued interest is 0
+- **GIVEN** a nonblank command key of at most 200 bytes
+- **WHEN** a client posts principal 1000, rate 0.12 and term 12
+- **THEN** HTTP 200 returns the persisted loan ID with PENDING status.
 
-### Requirement: No origination checks
-The system SHALL accept the numbers it is given, including zero or negative principal, rate, or term.
+### Requirement: Atomic canonical identity
+The command SHALL require a nonblank key of at most 200 bytes. Header/body keys MUST agree when both are supplied. Identical payloads with the same key SHALL return the original persisted ID with HTTP 200; changed principal, rate or term SHALL return HTTP 409. All writers sharing a repository SHALL arbitrate atomically, not by handler-local locks.
 
-#### Scenario: Zero principal
-- **WHEN** the principal is 0
-- **THEN** the response is HTTP 200 and a loan id is returned
+#### Scenario: Multiple handler instances
+- **GIVEN** concurrent handlers sharing one repository
+- **WHEN** they create the same keyed payload
+- **THEN** all return the same persisted ID and no replay resets servicing state.
 
-### Requirement: Optional idempotency key
-The system SHALL originate a loan at most once when `idempotency_key` is set, and SHALL include the original loan id in the rejection. A create that omits the key SHALL originate another loan.
+### Requirement: Validate legacy terms
+Nonpositive principal, negative annual rate or term outside 1..600 MUST be rejected with HTTP 400 before persistence. Previously stored invalid rows are not migrated; invalid historical payloads cannot be replayed through the command.
 
-#### Scenario: Keyed create is not repeated
-- **GIVEN** a create with key `l-1` returned loan id L
-- **WHEN** the same body is posted again
-- **THEN** the response is HTTP 400
-- **AND** the body contains `idempotency key already used` and L
-- **AND** a payoff read for L is unchanged
-
-#### Scenario: Missing key creates another loan
-- **WHEN** two creates omit `idempotency_key`
-- **THEN** both responses are HTTP 200
-- **AND** the loan ids differ
+#### Scenario: Zero principal rejected
+- **WHEN** a keyed request specifies zero principal
+- **THEN** HTTP 400 is returned and no loan is persisted.
 
 ### Requirement: Reject invalid JSON
 The system SHALL reject a body that is not JSON.
 
 #### Scenario: Not JSON
 - **WHEN** the body is not JSON
-- **THEN** the response is HTTP 400 and the body contains `invalid json`
+- **THEN** HTTP 400 is returned.

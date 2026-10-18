@@ -10,18 +10,23 @@ paths:
     post:
       operationId: createLoan
       summary: Create a pending loan (implemented)
-      description: Idempotency-Key is accepted as an alternative to body idempotency_key; if both are supplied they must match.
+      description: A nonblank key of at most 200 bytes is required, supplied through Idempotency-Key or body idempotency_key; if both are supplied they must match.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 200 }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [principal, interest_rate, term_months, idempotency_key]
+              required: [principal, interest_rate, term_months]
               properties:
-                principal: { type: string, example: "10000.00" }
-                interest_rate: { type: string, example: "0.08" }
-                term_months: { type: integer, minimum: 1 }
+                principal: { type: string, example: "10000.00", description: Must be positive; exact decimal parsing }
+                interest_rate: { type: string, example: "0.08", description: Nonnegative nominal annual rate }
+                term_months: { type: integer, minimum: 1, maximum: 600 }
                 idempotency_key: { type: string }
       responses:
         '200':
@@ -29,7 +34,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LoanCreated' }
-        '400': { description: Invalid JSON, missing key, or key/header disagreement }
+        '400': { description: Invalid JSON, invalid terms, missing/blank/oversized key, or key/header disagreement }
         '409': { description: Idempotency key reused with a different payload }
   /v1/loans/{id}/payoff:
     get:
@@ -57,10 +62,12 @@ components:
         loan_id: { type: string, format: uuid }
     PayoffQuote:
       type: object
+      description: Legacy response casing retained; no currency field is emitted by this endpoint.
+      required: [Principal, AccruedInterest, Total]
       properties:
-        loan_id: { type: string, format: uuid }
-        amount: { type: string }
-        currency: { type: string, description: Not present in current implementation }
+        Principal: { type: string }
+        AccruedInterest: { type: string }
+        Total: { type: string }
 plannedRoutes:
   description: Planned only; excluded from executable paths until implementation and tested publication.
   routes:
