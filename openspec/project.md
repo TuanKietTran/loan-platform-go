@@ -19,6 +19,10 @@ Go 1.22, Chi, `shopspring/decimal`, Google UUID. In-memory only.
 | 2026-10-17 | 1000 requests in one minute, retry, playback, coverage | `internal/playback`. 1000 keyed loans plus one 503 retry each finished in 80ms. Replay returned the original ids. A missing key still creates another loan. Statement coverage 61.6%. |
 | 2026-10-17 | Definition of done and playback storyboard | `openspec/dod.md` and `openspec/gifs/playback-flow.gif`. GIF review: retry stays at the pre-write state, playback shows the unchanged result. |
 
+### 2026-10-18 servicing-core checkpoint
+
+Pure application/agreement servicing is implemented in `internal/domain/agreement.go` and asserted by `agreement_test.go`. This is not yet wired into HTTP or persistence. Evidence: `GOTOOLCHAIN=local go test ./internal/domain -count=1 -coverprofile=/tmp/loans-domain-cover.out` reports 97.4% domain statement coverage on macOS arm64, Go 1.27.1. The checkpoint commit is recorded in STATUS (self-reference omitted here). The archived change is `2026-10-18-loan-servicing-core`.
+
 ## Out of scope until implemented
 
 - `RecordRepayment`, `AccrueInterest` as a command, `GetLoan`, and `GetSchedule` are named in the README and have no HTTP route.
