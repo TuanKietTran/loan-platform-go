@@ -1,15 +1,42 @@
 openapi: 3.0.3
 info:
   title: Loan Platform API
-  version: 0.1.0
-  description: Implemented endpoints are limited to create and payoff. Future routes are documented under plannedRoutes and are not callable yet.
+  version: 0.2.0
+  description: |
+    Legacy in-memory create/payoff routes plus the serviced-agreement lifecycle
+    (application, disbursement, accrual, late fees, repayment, payoff quote).
+    Agreement state is process-local and intents are not restart-durable.
+    Money is a decimal string with exactly two places (USD only). Dates are
+    UTC calendar dates, YYYY-MM-DD. Interest is ACT/365F and excludes the
+    accrual date. Cash moves only through the payment service using stable keys
+    derived from the agreement and the Idempotency-Key; the loan service never
+    accepts settled-payment evidence from a caller and never writes the ledger.
+    A 502 or 503 on a cash route leaves a persisted intent; retry with the same
+    Idempotency-Key (the server also retries unfinished intents periodically).
 servers:
-  - url: http://localhost:8104
+  - url: http://localhost:8084
 paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness
+      responses:
+        '200': { description: Process is up }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness; fraud and payments must answer GET /healthz with a non-5xx status
+      responses:
+        '200': { description: Ready }
+        '503':
+          description: A downstream service is unreachable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /v1/loans:
     post:
       operationId: createLoan
-      summary: Create a pending loan (implemented)
+      summary: Create a pending legacy loan (in-memory, no agreement servicing)
       description: A nonblank key of at most 200 bytes is required, supplied through Idempotency-Key or body idempotency_key; if both are supplied they must match.
       parameters:
         - in: header
@@ -39,12 +66,9 @@ paths:
   /v1/loans/{id}/payoff:
     get:
       operationId: getPayoff
-      summary: Quote outstanding principal plus accrued interest (implemented)
+      summary: Legacy payoff quote; reads only the legacy loan store, never serviced agreements
       parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/LoanId'
       responses:
         '200':
           description: Payoff quote
@@ -53,7 +77,183 @@ paths:
               schema: { $ref: '#/components/schemas/PayoffQuote' }
         '400': { description: Invalid loan UUID }
         '404': { description: Loan not found }
+  /v1/applications:
+    post:
+      operationId: createApplication
+      summary: Screen an application with the fraud service and originate an agreement
+      description: |
+        Idempotent by Idempotency-Key. The fraud event id is derived from the
+        key, so replays reuse the same decision. ALLOW yields PENDING, REVIEW
+        yields REVIEW, DENY/BLOCK or failed affordability yields DECLINED.
+        Only PENDING agreements can be disbursed.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplicationRequest' }
+      responses:
+        '200':
+          description: Created or replayed agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/loans/{id}:
+    get:
+      operationId: getAgreement
+      summary: Read a serviced agreement
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+      responses:
+        '200':
+          description: Agreement including schedule and current balances
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/loans/{id}/disburse:
+    post:
+      operationId: disburseAgreement
+      summary: Pay the principal from the funding account to the borrower account
+      description: Persists a cash intent, settles the payment through the payment service, then activates the agreement from trusted SETTLED evidence with a ledger transaction. No request body.
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Active agreement (or the original result on replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/loans/{id}/repayments:
+    post:
+      operationId: repayAgreement
+      summary: Collect a repayment from the borrower account to the funding account
+      description: |
+        Accrues through the date, then allocates fees, accrued interest and
+        principal in that order. The amount may not exceed the payoff on the
+        date. A prepayment regenerates the remaining schedule. Paying exactly
+        the payoff quote for the same date sets status PAID_OFF.
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepaymentRequest' }
+      responses:
+        '200':
+          description: Updated agreement and allocation (the original result on replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Repayment' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/loans/{id}/accruals:
+    post:
+      operationId: accrueAgreement
+      summary: Book interest through a date (date excluded); repeats and period splits do not double round
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccrualRequest' }
+      responses:
+        '200':
+          description: Updated agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/loans/{id}/fees:
+    post:
+      operationId: assessLateFees
+      summary: Accrue through the date and charge one fixed fee per overdue unpaid instalment, once per instalment
+      description: An instalment is overdue the day after its due date. Status becomes DELINQUENT while any instalment is overdue and unpaid, otherwise ACTIVE.
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeeRequest' }
+      responses:
+        '200':
+          description: Updated agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/loans/{id}/payoff-quote:
+    get:
+      operationId: getAgreementPayoffQuote
+      summary: Payoff of a serviced agreement on a date (remaining principal + accrued interest + unpaid fees)
+      description: Read-only; does not persist the accrual. Requires an ACTIVE or DELINQUENT agreement and a date not before the last accrual date.
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+        - in: query
+          name: date
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Quote; total = principal + interest + fees
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementPayoffQuote' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
 components:
+  parameters:
+    LoanId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+  responses:
+    Error:
+      description: |
+        Error envelope. 400 malformed request or key; 404 unknown loan; 409 key
+        reused with a different payload; 422 rejected by domain rules; 502
+        downstream failure or payment not settled; 503 circuit open or request
+        cancelled.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   schemas:
     LoanCreated:
       type: object
@@ -68,13 +268,100 @@ components:
         Principal: { type: string }
         AccruedInterest: { type: string }
         Total: { type: string }
-plannedRoutes:
-  description: Planned only; excluded from executable paths until implementation and tested publication.
-  routes:
-    - POST /v1/applications
-    - GET /v1/loans/{id}
-    - GET /v1/loans/{id}/schedule
-    - POST /v1/loans/{id}/disbursement
-    - POST /v1/loans/{id}/repayments
-    - POST /v1/loans/{id}/accrual
-    - POST /v1/loans/{id}/prepayment
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: '#/components/schemas/Error' }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [invalid_request, not_found, conflict, unprocessable, downstream_error, unavailable, not_ready] }
+        message: { type: string }
+    ApplicationRequest:
+      type: object
+      required: [borrower_id, funding_account, borrower_account, principal, annual_rate, term_months, monthly_income, monthly_debt, start_date]
+      description: USD, two decimal places, straight-line repayment. Funding and borrower accounts must be distinct ledger account UUIDs. Unknown fields are rejected.
+      properties:
+        borrower_id: { type: string, format: uuid }
+        funding_account: { type: string, format: uuid }
+        borrower_account: { type: string, format: uuid }
+        principal: { type: string, example: "1200.00" }
+        annual_rate: { type: string, example: "0.12", description: Nominal annual rate as a fraction }
+        term_months: { type: integer, minimum: 1, maximum: 600 }
+        monthly_income: { type: string, example: "2000.00", description: Must be positive }
+        monthly_debt: { type: string, example: "0.00" }
+        start_date: { type: string, format: date }
+    RepaymentRequest:
+      type: object
+      required: [date, amount, prepayment]
+      properties:
+        date: { type: string, format: date }
+        amount: { type: string, example: "100.00", description: Positive, two decimal places }
+        prepayment: { type: boolean }
+    AccrualRequest:
+      type: object
+      required: [date]
+      properties:
+        date: { type: string, format: date }
+    FeeRequest:
+      type: object
+      required: [date, fee]
+      properties:
+        date: { type: string, format: date }
+        fee: { type: string, example: "10.00", description: Fee per overdue instalment, nonnegative }
+    ScheduleItem:
+      type: object
+      required: [number, due_date, principal, interest, total]
+      properties:
+        number: { type: integer }
+        due_date: { type: string, format: date }
+        principal: { type: string }
+        interest: { type: string }
+        total: { type: string }
+    Agreement:
+      type: object
+      required: [id, status, risk_band, borrower_id, funding_account, borrower_account, currency, principal, annual_rate, term_months, start_date, outstanding_principal, accrued_interest, fees, last_accrual_date, payment_ids, schedule]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, REVIEW, DECLINED, ACTIVE, DELINQUENT, PAID_OFF] }
+        risk_band: { type: string }
+        borrower_id: { type: string, format: uuid }
+        funding_account: { type: string, format: uuid }
+        borrower_account: { type: string, format: uuid }
+        currency: { type: string, enum: [USD] }
+        principal: { type: string }
+        annual_rate: { type: string }
+        term_months: { type: integer }
+        start_date: { type: string, format: date }
+        outstanding_principal: { type: string }
+        accrued_interest: { type: string, description: Booked and unpaid }
+        fees: { type: string, description: Assessed and unpaid }
+        last_accrual_date: { type: string, description: Empty before disbursement }
+        payment_ids: { type: array, items: { type: string, format: uuid }, description: Settled payments applied, in order }
+        schedule: { type: array, items: { $ref: '#/components/schemas/ScheduleItem' } }
+    Allocation:
+      type: object
+      required: [fees, interest, principal]
+      properties:
+        fees: { type: string }
+        interest: { type: string }
+        principal: { type: string }
+    Repayment:
+      type: object
+      required: [agreement, allocation]
+      properties:
+        agreement: { $ref: '#/components/schemas/Agreement' }
+        allocation: { $ref: '#/components/schemas/Allocation' }
+    AgreementPayoffQuote:
+      type: object
+      required: [loan_id, date, currency, principal, interest, fees, total]
+      properties:
+        loan_id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        currency: { type: string }
+        principal: { type: string }
+        interest: { type: string }
+        fees: { type: string }
+        total: { type: string }
