@@ -340,3 +340,26 @@ func TestLifecycleRejectsMalformedRequests(t *testing.T) {
 	r.status("POST", missing+"/disburse", "k", "", 404)
 	r.status("POST", p+"/repayments", "", `{"date":"2024-02-01","amount":"1.00","prepayment":false}`, 400)
 }
+
+func TestRuntimeDiagnosticsLoopbackAndSchema(t *testing.T) {
+	a := New(Config{RecoverEvery: time.Hour})
+	s := httptest.NewServer(a.Handler)
+	defer s.Close()
+	req, _ := http.NewRequest(http.MethodGet, s.URL+"/debug/runtime", nil)
+	req.Header.Set("X-Request-ID", "diag-test")
+	resp, err := s.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Request-ID") != "diag-test" {
+		t.Fatalf("status=%d id=%q", resp.StatusCode, resp.Header.Get("X-Request-ID"))
+	}
+	var got runtimeDiagnostics
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.HeapAllocBytes == 0 || got.HeapSysBytes == 0 || got.Goroutines < 1 || got.OpenConnections < 0 {
+		t.Fatalf("diagnostics: %+v", got)
+	}
+}

@@ -4,13 +4,17 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/TuanKietTran/loan-platform-go/internal/adapter"
@@ -56,8 +60,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 }
 
 type App struct {
-	Handler http.Handler
-	Cash    *command.CashService
+	Handler     http.Handler
+	connections atomic.Int64
+	Cash        *command.CashService
 	// Ready reports whether downstream services are reachable.
 	Ready func(context.Context) error
 	cfg   Config
@@ -106,7 +111,7 @@ func New(cfg Config) *App {
 	(&api.Lifecycle{Agreements: agreements, Cash: a.Cash}).Register(v1)
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
@@ -120,6 +125,15 @@ func New(cfg Config) *App {
 		_, _ = w.Write([]byte(`{"status":"ready"}` + "\n"))
 	})
 	r.Mount("/v1", v1)
+	r.Group(func(d chi.Router) {
+		d.Use(loopbackOnly)
+		d.Get("/debug/runtime", a.runtimeDiagnostics)
+		d.HandleFunc("/debug/pprof/", pprof.Index)
+		d.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		d.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		d.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		d.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	})
 	a.Handler = r
 	return a
 }
@@ -142,8 +156,45 @@ func RecoverLoop(ctx context.Context, cash *command.CashService, every time.Dura
 }
 
 // Serve runs the API and recovery loop until ctx ends, then drains requests.
+func loopbackOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		ip := net.ParseIP(host)
+		if err != nil || ip == nil || !ip.IsLoopback() {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type runtimeDiagnostics struct {
+	HeapAllocBytes  uint64 `json:"heap_alloc_bytes"`
+	HeapSysBytes    uint64 `json:"heap_sys_bytes"`
+	Goroutines      int    `json:"goroutines"`
+	OpenConnections int64  `json:"open_connections"`
+	GCPauseTotalNS  uint64 `json:"gc_pause_total_ns"`
+	NumGC           uint32 `json:"num_gc"`
+}
+
+func (a *App) runtimeDiagnostics(w http.ResponseWriter, r *http.Request) {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", middleware.GetReqID(r.Context()))
+	_ = json.NewEncoder(w).Encode(runtimeDiagnostics{m.HeapAlloc, m.HeapSys, runtime.NumGoroutine(), a.connections.Load(), m.PauseTotalNs, m.NumGC})
+}
+
 func Serve(ctx context.Context, ln net.Listener, a *App) error {
 	srv := &http.Server{
+		ConnState: func(c net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				a.connections.Add(1)
+			case http.StateClosed, http.StateHijacked:
+				a.connections.Add(-1)
+			}
+		},
 		Handler:           a.Handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
