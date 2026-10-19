@@ -56,6 +56,7 @@ func TestR1TenThousandLifecycleApplications(t *testing.T) {
 	})
 	srv := httptest.NewServer(proxy)
 	defer srv.Close()
+	client := &http.Client{Transport: &http.Transport{MaxIdleConns: 256, MaxIdleConnsPerHost: 128, MaxConnsPerHost: 128}}
 	const total = R1Requests
 	calls := make([]Call, total)
 	borrower, funding, account := uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -70,7 +71,7 @@ func TestR1TenThousandLifecycleApplications(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), Window)
 	defer cancel()
 	start := time.Now()
-	outcomes, err := Play(ctx, srv.Client(), srv.URL, calls, Policy{MaxAttempts: 6, BaseDelay: 50 * time.Millisecond, MaxDelay: 2 * time.Second, AttemptTimeout: 500 * time.Millisecond, Concurrency: 128})
+	outcomes, err := Play(ctx, client, srv.URL, calls, Policy{MaxAttempts: 6, BaseDelay: 50 * time.Millisecond, MaxDelay: 2 * time.Second, AttemptTimeout: 500 * time.Millisecond, Concurrency: 32})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("play: %v", err)
@@ -101,7 +102,7 @@ func TestR1TenThousandLifecycleApplications(t *testing.T) {
 	for i := 0; i < total*98/100; i++ {
 		queries = append(queries, Call{Method: http.MethodGet, Path: "/loans/" + ids[i]})
 	}
-	queried, e := Play(ctx, srv.Client(), srv.URL, queries, DefaultPolicy())
+	queried, e := Play(ctx, client, srv.URL, queries, DefaultPolicy())
 	if e != nil {
 		t.Fatal(e)
 	}
