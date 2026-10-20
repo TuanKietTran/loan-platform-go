@@ -1,5 +1,0 @@
-# Canonical legacy create replay
-
-The previous handler locked only itself, not all writers sharing a repository. Two handler instances could both miss the key and create different candidate IDs; Save suppressed the second write, but the second handler could return its unpersisted candidate ID. Move create/replay arbitration into a repository operation returning the canonical identity under its lock. Reject ID overwrites, preserve original terms/state on replay, propagate cancellation and use the shared conflict sentinel for HTTP 409.
-
-Deliberately replace the unsafe baseline acceptance of nonpositive principal, negative rates and out-of-range terms with validation (positive principal, nonnegative rate, term 1..600). Require a nonblank key of at most 200 bytes on commands. Adapter-level unkeyed imports remain internal and are not an HTTP capability. Preserve all prior tests; add regressions for corrected invariants and missing baseline command/query/repository/API paths. No data migration changes existing rows; replaying invalid historic payloads through the public command is now rejected.
